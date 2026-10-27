@@ -1,0 +1,6 @@
+{
+  "name": "Evidências de Garantia Automotiva",
+  "description": "Sistema profissional para gestão de evidências técnicas, fotos, vídeos de diagnóstico e geração de relatórios de garantia em PDF.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
