@@ -114,3 +114,64 @@ export const COMMON_TECHNICIANS = [
   'Alexandre Prado',
   'Marcelo Silva'
 ];
+
+/**
+ * Automatically infers the category of an evidence field key.
+ */
+export function getEvidenceCategory(
+  fieldKey: string,
+  existingCategory?: string
+): import('../types').EvidenceCategory {
+  if (
+    existingCategory &&
+    ['video', 'diagnostic_photo', 'new_part', 'replaced_part'].includes(existingCategory)
+  ) {
+    return existingCategory as import('../types').EvidenceCategory;
+  }
+  const k = fieldKey.toLowerCase();
+  if (k.startsWith('video') || k.includes('video')) return 'video';
+  if (k.startsWith('newpart') || k.includes('peca_nova') || k.includes('pecanova')) return 'new_part';
+  if (k.startsWith('replacedpart') || k.includes('peca_substituida') || k.includes('pecasubstituida')) return 'replaced_part';
+  return 'diagnostic_photo';
+}
+
+/**
+ * Creates a dynamic FieldDefinition for user-added photos, videos, or parts.
+ */
+export function createDynamicFieldDefinition(
+  key: string,
+  category?: import('../types').EvidenceCategory,
+  customLabel?: string,
+  type?: 'video' | 'image'
+): FieldDefinition {
+  const cat = category || getEvidenceCategory(key);
+  const isVideo = type ? type === 'video' : cat === 'video';
+
+  let defaultLabel = 'Foto Adicional';
+  let categoryLabel = 'Fotografias de Diagnóstico';
+  let description = 'Evidência fotográfica complementar anexada para a garantia.';
+
+  if (cat === 'video') {
+    defaultLabel = 'Vídeo Adicional';
+    categoryLabel = 'Vídeos de Diagnóstico';
+    description = 'Registro em vídeo complementar (movimento, ruído ou teste de validação).';
+  } else if (cat === 'new_part') {
+    defaultLabel = 'Peça Nova Adicional';
+    categoryLabel = 'Peça Nova (Genuína)';
+    description = 'Foto complementar da peça nova ou etiqueta adicional de rastreamento.';
+  } else if (cat === 'replaced_part') {
+    defaultLabel = 'Peça Substituída Adicional';
+    categoryLabel = 'Peça Substituída (Avariada)';
+    description = 'Foto complementar da avaria ou etiqueta da peça avariada substituída.';
+  }
+
+  return {
+    key,
+    label: customLabel || defaultLabel,
+    category: cat,
+    categoryLabel,
+    type: isVideo ? 'video' : 'image',
+    description,
+    isCustom: true
+  };
+}

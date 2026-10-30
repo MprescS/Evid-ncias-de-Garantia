@@ -11,7 +11,8 @@ import {
   RefreshCw,
   FileQuestion,
   Video,
-  Play
+  Play,
+  X
 } from 'lucide-react';
 import { FieldDefinition, StoredEvidenceFile } from '../types';
 import { formatFileSize } from '../utils/formatters';
@@ -25,6 +26,7 @@ interface EvidenceFieldProps {
   onDownload: (file: StoredEvidenceFile) => void;
   onRequestCamera: (fieldKey: string, label: string) => void;
   onRequestVideoCamera?: (fieldKey: string, label: string) => void;
+  onRemoveField?: (fieldKey: string) => void;
 }
 
 export const EvidenceField: React.FC<EvidenceFieldProps> = ({
@@ -35,7 +37,8 @@ export const EvidenceField: React.FC<EvidenceFieldProps> = ({
   onPreview,
   onDownload,
   onRequestCamera,
-  onRequestVideoCamera
+  onRequestVideoCamera,
+  onRemoveField
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraCaptureRef = useRef<HTMLInputElement>(null);
@@ -144,16 +147,29 @@ export const EvidenceField: React.FC<EvidenceFieldProps> = ({
           </p>
         </div>
 
-        {file ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] sm:text-xs font-mono font-medium text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 shrink-0">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            ANEXADO
-          </span>
-        ) : (
-          <span className="text-[10px] font-mono text-neutral-500 uppercase shrink-0">
-            Não anexado
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {file ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] sm:text-xs font-mono font-medium text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              ANEXADO
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono text-neutral-500 uppercase shrink-0">
+              Não anexado
+            </span>
+          )}
+
+          {field.isCustom && onRemoveField && (
+            <button
+              type="button"
+              onClick={() => onRemoveField(field.key)}
+              className="p-1 text-neutral-400 hover:text-red-400 hover:bg-red-950/40 transition-colors border border-transparent hover:border-red-500/30 cursor-pointer"
+              title="Remover este campo adicional"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Preview / Attachment Area: Perfectly framed with object-contain (NO CROPPING) */}

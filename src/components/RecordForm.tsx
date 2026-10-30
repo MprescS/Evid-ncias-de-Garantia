@@ -19,7 +19,9 @@ import {
   Copy,
   ExternalLink,
   Check,
-  X
+  X,
+  Plus,
+  Upload
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { supabaseWarrantyService } from '../services/supabaseWarrantyService';
@@ -29,16 +31,23 @@ import {
   WarrantyRecord,
   EvidenceFieldKey,
   StoredEvidenceFile,
-  ValidationSummary
+  ValidationSummary,
+  FieldDefinition,
+  EvidenceCategory,
+  Technician
 } from '../types';
-import { EVIDENCE_FIELDS, COMMON_TECHNICIANS } from '../utils/constants';
+import {
+  EVIDENCE_FIELDS,
+  COMMON_TECHNICIANS,
+  createDynamicFieldDefinition,
+  getEvidenceCategory
+} from '../utils/constants';
 import { validateRecord, formatDateBr, formatDateTimeBr } from '../utils/formatters';
 import { EvidenceField } from './EvidenceField';
 import { CameraCaptureModal } from './CameraCaptureModal';
 import { VideoCaptureModal } from './VideoCaptureModal';
 import { MediaViewerModal } from './MediaViewerModal';
 import { ConfirmModal } from './ConfirmModal';
-import { Technician } from '../types';
 
 interface RecordFormProps {
   initialRecord: WarrantyRecord;
@@ -82,6 +91,31 @@ export const RecordForm: React.FC<RecordFormProps> = ({
   });
 
   const autoSaveTimerRef = useRef<any>(null);
+  const batchPhotoInputRef = useRef<HTMLInputElement>(null);
+  const batchVideoInputRef = useRef<HTMLInputElement>(null);
+
+  // Dynamic custom fields added by user or restored from existing record
+  const [customFields, setCustomFields] = useState<FieldDefinition[]>(() => {
+    const standardKeys = new Set(EVIDENCE_FIELDS.map((f) => f.key));
+    const initialExtraKeys = Object.keys(initialRecord.evidences || {}).filter(
+      (k) => !standardKeys.has(k) && !!initialRecord.evidences[k]
+    );
+    return initialExtraKeys.map((key) => {
+      const ev = initialRecord.evidences[key];
+      const category = ev?.category || getEvidenceCategory(key);
+      return createDynamicFieldDefinition(
+        key,
+        category,
+        category === 'video'
+          ? 'Vídeo de diagnóstico adicional'
+          : category === 'new_part'
+          ? 'Peça Nova adicional'
+          : category === 'replaced_part'
+          ? 'Peça Substituída adicional'
+          : 'Foto de diagnóstico adicional'
+      );
+    });
+  });
 
   // Section quick filter for smartphone & tablet usability
   const [activeSection, setActiveSection] = useState<'all' | 'identification' | 'report' | 'videos' | 'photos' | 'parts'>('all');
@@ -368,11 +402,173 @@ export const RecordForm: React.FC<RecordFormProps> = ({
     }
   };
 
-  // Group fields
-  const videoFields = EVIDENCE_FIELDS.filter((f) => f.category === 'video');
-  const diagnosticPhotoFields = EVIDENCE_FIELDS.filter((f) => f.category === 'diagnostic_photo');
-  const newPartFields = EVIDENCE_FIELDS.filter((f) => f.category === 'new_part');
-  const replacedPartFields = EVIDENCE_FIELDS.filter((f) => f.category === 'replaced_part');
+  // Dynamic slot additions
+  const handleAddVideoSlot = () => {
+    const nextNum = videoFields.length + 1;
+    const newKey = `video${nextNum}_${generateUUID().slice(0, 4)}`;
+    const newField = createDynamicFieldDefinition(
+      newKey,
+      'video',
+      `Vídeo de diagnóstico ${nextNum}`,
+      'video'
+    );
+    setCustomFields((prev) => [...prev, newField]);
+  };
+
+  const handleAddPhotoSlot = () => {
+    const nextNum = diagnosticPhotoFields.length + 1;
+    const newKey = `photo${nextNum}_${generateUUID().slice(0, 4)}`;
+    const newField = createDynamicFieldDefinition(
+      newKey,
+      'diagnostic_photo',
+      `Foto de diagnóstico ${nextNum}`,
+      'image'
+    );
+    setCustomFields((prev) => [...prev, newField]);
+  };
+
+  const handleAddPartSlot = (category: 'new_part' | 'replaced_part') => {
+    const isNew = category === 'new_part';
+    const list = isNew ? newPartFields : replacedPartFields;
+    const nextNum = list.length + 1;
+    const prefix = isNew ? 'newPart' : 'replacedPart';
+    const newKey = `${prefix}_extra_${generateUUID().slice(0, 4)}`;
+    const label = isNew
+      ? `Peça Nova / Etiqueta ${nextNum}`
+      : `Peça Substituída / Etiqueta ${nextNum}`;
+    const newField = createDynamicFieldDefinition(newKey, category, label, 'image');
+    setCustomFields((prev) => [...prev, newField]);
+  };
+
+  const handleRemoveCustomField = (fieldKey: string) => {
+    setCustomFields((prev) => prev.filter((f) => f.key !== fieldKey));
+    if (formData.evidences[fieldKey]) {
+      const updatedEvidences = { ...formData.evidences };
+      delete updatedEvidences[fieldKey];
+      const updated: WarrantyRecord = {
+        ...formData,
+        evidences: updatedEvidences,
+        updatedAt: new Date().toISOString()
+      };
+      setFormData(updated);
+      triggerAutoSave(updated, 'Removendo campo e evidência...');
+    }
+  };
+
+  const handleBatchUpload = async (
+    category: 'video' | 'diagnostic_photo',
+    fileList: FileList | null
+  ) => {
+    if (!fileList || fileList.length === 0) return;
+    const selectedFiles = Array.from(fileList);
+    const isVideo = category === 'video';
+
+    const validFiles = selectedFiles.filter((f) =>
+      isVideo
+        ? f.type.startsWith('video/') || f.name.match(/\.(mp4|mov|webm)$/i)
+        : f.type.startsWith('image/')
+    );
+
+    if (validFiles.length === 0) {
+      alert(
+        isVideo
+          ? 'Nenhum arquivo de vídeo válido selecionado (MP4, MOV, WebM).'
+          : 'Nenhum arquivo de imagem válido selecionado (JPG, PNG, WebP).'
+      );
+      return;
+    }
+
+    setAutoSyncState({
+      status: 'saving',
+      message: `Processando ${validFiles.length} ${isVideo ? 'vídeo(s)' : 'foto(s)'}...`
+    });
+
+    const relevantFields = isVideo ? [...videoFields] : [...diagnosticPhotoFields];
+    const newEvidences = { ...formData.evidences };
+    const fieldsToAdd: FieldDefinition[] = [];
+
+    const readFileAsDataUrl = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    };
+
+    let slotPointer = 0;
+
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const dataUrl = await readFileAsDataUrl(file);
+
+      // Find next available empty slot
+      let targetKey: string | null = null;
+      while (slotPointer < relevantFields.length) {
+        const candidateKey = relevantFields[slotPointer].key;
+        if (!newEvidences[candidateKey]) {
+          targetKey = candidateKey;
+          slotPointer++;
+          break;
+        }
+        slotPointer++;
+      }
+
+      // If no available empty slot, generate a new custom slot
+      if (!targetKey) {
+        const nextNum = relevantFields.length + fieldsToAdd.length + 1;
+        targetKey = isVideo
+          ? `video${nextNum}_${generateUUID().slice(0, 4)}`
+          : `photo${nextNum}_${generateUUID().slice(0, 4)}`;
+        const newField = createDynamicFieldDefinition(
+          targetKey,
+          category,
+          isVideo ? `Vídeo de diagnóstico ${nextNum}` : `Foto de diagnóstico ${nextNum}`,
+          isVideo ? 'video' : 'image'
+        );
+        fieldsToAdd.push(newField);
+      }
+
+      newEvidences[targetKey] = {
+        id: generateUUID(),
+        fieldKey: targetKey,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+        dataUrl,
+        capturedAt: new Date().toISOString(),
+        category
+      };
+    }
+
+    if (fieldsToAdd.length > 0) {
+      setCustomFields((prev) => [...prev, ...fieldsToAdd]);
+    }
+
+    const updated: WarrantyRecord = {
+      ...formData,
+      evidences: newEvidences,
+      updatedAt: new Date().toISOString()
+    };
+
+    setFormData(updated);
+    triggerAutoSave(
+      updated,
+      `Enviando ${validFiles.length} ${isVideo ? 'vídeo(s)' : 'foto(s)'} para a nuvem...`
+    );
+  };
+
+  // Group all fields combining standard and dynamic custom slots
+  const allFields = [...EVIDENCE_FIELDS, ...customFields];
+  const videoFields = allFields.filter((f) => f.category === 'video');
+  const diagnosticPhotoFields = allFields.filter((f) => f.category === 'diagnostic_photo');
+  const newPartFields = allFields.filter((f) => f.category === 'new_part');
+  const replacedPartFields = allFields.filter((f) => f.category === 'replaced_part');
+
+  const attachedVideoCount = videoFields.filter((f) => !!formData.evidences[f.key]).length;
+  const attachedPhotoCount = diagnosticPhotoFields.filter((f) => !!formData.evidences[f.key]).length;
+  const attachedNewPartCount = newPartFields.filter((f) => !!formData.evidences[f.key]).length;
+  const attachedReplacedPartCount = replacedPartFields.filter((f) => !!formData.evidences[f.key]).length;
 
   return (
     <div className="space-y-6 pb-28 sm:pb-16 max-w-7xl mx-auto">
@@ -538,7 +734,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 : 'bg-[#121214] border border-[#27272E] text-neutral-300 hover:text-white hover:bg-[#222228]'
             }`}
           >
-            3. Vídeos ({Object.keys(formData.evidences).filter(k => k.startsWith('video') && formData.evidences[k as EvidenceFieldKey]).length}/2)
+            3. Vídeos ({attachedVideoCount})
           </button>
           <button
             onClick={() => setActiveSection('photos')}
@@ -548,7 +744,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 : 'bg-[#121214] border border-[#27272E] text-neutral-300 hover:text-white hover:bg-[#222228]'
             }`}
           >
-            4. Fotos Diagnóstico ({Object.keys(formData.evidences).filter(k => k.startsWith('photo') && formData.evidences[k as EvidenceFieldKey]).length}/4)
+            4. Fotos Diagnóstico ({attachedPhotoCount})
           </button>
           <button
             onClick={() => setActiveSection('parts')}
@@ -558,7 +754,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 : 'bg-[#121214] border border-[#27272E] text-neutral-300 hover:text-white hover:bg-[#222228]'
             }`}
           >
-            5. Peças & Etiquetas ({Object.keys(formData.evidences).filter(k => (k.startsWith('newPart') || k.startsWith('replacedPart')) && formData.evidences[k as EvidenceFieldKey]).length}/6)
+            5. Peças & Etiquetas ({attachedNewPartCount + attachedReplacedPartCount})
           </button>
         </div>
       </div>
@@ -765,17 +961,54 @@ export const RecordForm: React.FC<RecordFormProps> = ({
       {/* ======================================================== */}
       {(activeSection === 'all' || activeSection === 'videos') && (
         <div className="bg-[#18181C] border border-[#27272E] p-4 sm:p-6 shadow-sm space-y-4">
-          <div className="border-b border-[#27272E] pb-3 flex items-center justify-between">
+          <div className="border-b border-[#27272E] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
-                <Film className="w-4 h-4 text-[#D5001C]" />
-                3. Vídeos de Diagnóstico
-              </h3>
-              <p className="text-[11px] text-neutral-400 mt-0.5">
-                Grave diretamente pela câmera do smartphone ou selecione do dispositivo (MP4 / MOV)
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                  <Film className="w-4 h-4 text-[#D5001C]" />
+                  3. Vídeos de Diagnóstico
+                </h3>
+                <span className="text-[10px] sm:text-xs font-mono font-semibold px-2 py-0.5 bg-[#25252D] text-neutral-300 border border-[#343440]">
+                  {attachedVideoCount} {attachedVideoCount === 1 ? 'vídeo anexado' : 'vídeos anexados'}
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-400 mt-1">
+                Grave pela câmera do smartphone ou selecione quantos vídeos julgar necessários (sem limite)
               </p>
             </div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400">2 Campos</span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={batchVideoInputRef}
+                type="file"
+                multiple
+                accept="video/mp4,video/quicktime,video/webm,video/*"
+                className="hidden"
+                onChange={(e) => {
+                  handleBatchUpload('video', e.target.files);
+                  if (batchVideoInputRef.current) batchVideoInputRef.current.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => batchVideoInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-3 h-8 bg-[#222228] hover:bg-[#2C2C34] text-neutral-200 hover:text-white border border-[#363642] text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer"
+                title="Selecionar um ou vários arquivos de vídeo do dispositivo"
+              >
+                <Upload className="w-3.5 h-3.5 text-neutral-400" />
+                <span>Importar Vídeos</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAddVideoSlot}
+                className="inline-flex items-center gap-1.5 px-3 h-8 bg-[#D5001C] hover:bg-[#b00017] text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-xs"
+                title="Adicionar mais um campo para novo vídeo"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Adicionar Vídeo</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -790,6 +1023,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 onDownload={handleDownloadFile}
                 onRequestCamera={(fieldKey, label) => setCameraState({ isOpen: true, fieldKey: fieldKey as EvidenceFieldKey, fieldLabel: label })}
                 onRequestVideoCamera={(fieldKey, label) => setVideoCameraState({ isOpen: true, fieldKey: fieldKey as EvidenceFieldKey, fieldLabel: label })}
+                onRemoveField={handleRemoveCustomField}
               />
             ))}
           </div>
@@ -801,17 +1035,54 @@ export const RecordForm: React.FC<RecordFormProps> = ({
       {/* ======================================================== */}
       {(activeSection === 'all' || activeSection === 'photos') && (
         <div className="bg-[#18181C] border border-[#27272E] p-4 sm:p-6 shadow-sm space-y-4">
-          <div className="border-b border-[#27272E] pb-3 flex items-center justify-between">
+          <div className="border-b border-[#27272E] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
-                <Camera className="w-4 h-4 text-[#D5001C]" />
-                4. Fotografias de Diagnóstico
-              </h3>
-              <p className="text-[11px] text-neutral-400 mt-0.5">
-                Visão geral, evidência do dano, macro e medições com enquadramento integral
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-[#D5001C]" />
+                  4. Fotografias de Diagnóstico
+                </h3>
+                <span className="text-[10px] sm:text-xs font-mono font-semibold px-2 py-0.5 bg-[#25252D] text-neutral-300 border border-[#343440]">
+                  {attachedPhotoCount} {attachedPhotoCount === 1 ? 'foto anexada' : 'fotos anexadas'}
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-400 mt-1">
+                Visão geral, dano, macro, medições. Adicione ou importe quantas fotos desejar sem qualquer limite.
               </p>
             </div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400">4 Campos</span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={batchPhotoInputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp,image/*"
+                className="hidden"
+                onChange={(e) => {
+                  handleBatchUpload('diagnostic_photo', e.target.files);
+                  if (batchPhotoInputRef.current) batchPhotoInputRef.current.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => batchPhotoInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-3 h-8 bg-[#222228] hover:bg-[#2C2C34] text-neutral-200 hover:text-white border border-[#363642] text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer"
+                title="Selecionar várias fotos de uma vez do celular ou computador"
+              >
+                <Upload className="w-3.5 h-3.5 text-neutral-400" />
+                <span>Importar Múltiplas Fotos</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAddPhotoSlot}
+                className="inline-flex items-center gap-1.5 px-3 h-8 bg-[#D5001C] hover:bg-[#b00017] text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-xs"
+                title="Adicionar mais um campo para fotografia diagnóstica"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Adicionar Foto</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -825,6 +1096,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 onPreview={(file, label) => setPreviewState({ isOpen: true, file, fieldLabel: label })}
                 onDownload={handleDownloadFile}
                 onRequestCamera={(fieldKey, label) => setCameraState({ isOpen: true, fieldKey: fieldKey as EvidenceFieldKey, fieldLabel: label })}
+                onRemoveField={handleRemoveCustomField}
               />
             ))}
           </div>
@@ -863,11 +1135,24 @@ export const RecordForm: React.FC<RecordFormProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Peça Nova Block */}
             <div className="p-3.5 sm:p-4 bg-[#141417] border border-[#26262D] space-y-3">
-              <div className="flex items-center justify-between border-b border-[#26262D] pb-2">
-                <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
-                  Peça Nova (Genuína de Reposição)
-                </span>
-                <span className="text-[10px] font-mono text-neutral-400 font-semibold">1 Foto + 2 Etiquetas</span>
+              <div className="flex items-center justify-between border-b border-[#26262D] pb-2 flex-wrap gap-2">
+                <div>
+                  <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
+                    Peça Nova (Genuína de Reposição)
+                  </span>
+                  <span className="text-[10px] font-mono text-neutral-400 font-semibold block sm:inline sm:ml-2">
+                    {attachedNewPartCount} anexada(s)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddPartSlot('new_part')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#222228] hover:bg-[#2C2C34] text-neutral-200 hover:text-white border border-[#363642] text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                  title="Adicionar mais uma foto ou etiqueta para a peça nova"
+                >
+                  <Plus className="w-3 h-3 text-[#D5001C]" />
+                  <span>Adicionar Campo</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {newPartFields.map((field) => (
@@ -880,6 +1165,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                     onPreview={(file, label) => setPreviewState({ isOpen: true, file, fieldLabel: label })}
                     onDownload={handleDownloadFile}
                     onRequestCamera={(fieldKey, label) => setCameraState({ isOpen: true, fieldKey: fieldKey as EvidenceFieldKey, fieldLabel: label })}
+                    onRemoveField={handleRemoveCustomField}
                   />
                 ))}
               </div>
@@ -887,11 +1173,24 @@ export const RecordForm: React.FC<RecordFormProps> = ({
 
             {/* Peça Substituída Block */}
             <div className="p-3.5 sm:p-4 bg-[#141417] border border-[#26262D] space-y-3">
-              <div className="flex items-center justify-between border-b border-[#26262D] pb-2">
-                <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
-                  Peça Substituída (Avariada Removida)
-                </span>
-                <span className="text-[10px] font-mono text-neutral-400 font-semibold">1 Foto + 2 Etiquetas</span>
+              <div className="flex items-center justify-between border-b border-[#26262D] pb-2 flex-wrap gap-2">
+                <div>
+                  <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
+                    Peça Substituída (Avariada Removida)
+                  </span>
+                  <span className="text-[10px] font-mono text-neutral-400 font-semibold block sm:inline sm:ml-2">
+                    {attachedReplacedPartCount} anexada(s)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddPartSlot('replaced_part')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#222228] hover:bg-[#2C2C34] text-neutral-200 hover:text-white border border-[#363642] text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                  title="Adicionar mais uma foto ou etiqueta para a peça avariada substituída"
+                >
+                  <Plus className="w-3 h-3 text-[#D5001C]" />
+                  <span>Adicionar Campo</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {replacedPartFields.map((field) => (
@@ -904,6 +1203,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                     onPreview={(file, label) => setPreviewState({ isOpen: true, file, fieldLabel: label })}
                     onDownload={handleDownloadFile}
                     onRequestCamera={(fieldKey, label) => setCameraState({ isOpen: true, fieldKey: fieldKey as EvidenceFieldKey, fieldLabel: label })}
+                    onRemoveField={handleRemoveCustomField}
                   />
                 ))}
               </div>

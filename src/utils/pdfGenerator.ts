@@ -354,77 +354,104 @@ export async function generateWarrantyPdf(record: WarrantyRecord): Promise<Uint8
   });
   y -= 12;
 
-  const videoFields: { key: 'video1' | 'video2'; label: string }[] = [
-    { key: 'video1', label: 'Vídeo de Diagnóstico 1' },
-    { key: 'video2', label: 'Vídeo de Diagnóstico 2' }
-  ];
+  // Dynamic collection of all video evidences
+  const standardVideoKeys = ['video1', 'video2'];
+  const allVideoKeys = Array.from(
+    new Set([
+      ...standardVideoKeys,
+      ...Object.keys(record.evidences || {}).filter((k) => {
+        const ev = record.evidences[k];
+        return (
+          k.toLowerCase().startsWith('video') ||
+          ev?.category === 'video' ||
+          ev?.mimeType?.startsWith('video/')
+        );
+      })
+    ])
+  ).filter((k, idx) => idx < 2 || !!record.evidences[k]);
 
   const videoCardWidth = (CONTENT_WIDTH - 12) / 2;
   const videoCardHeight = 54;
 
-  videoFields.forEach((vField, idx) => {
-    const cardX = MARGIN + idx * (videoCardWidth + 12);
-    const video = record.evidences[vField.key];
+  for (let i = 0; i < allVideoKeys.length; i += 2) {
+    ensureSpace(videoCardHeight + 16);
 
-    currentPage.drawRectangle({
-      x: cardX,
-      y: y - videoCardHeight,
-      width: videoCardWidth,
-      height: videoCardHeight,
-      color: COLOR_LIGHT_BG,
-      borderColor: COLOR_BORDER,
-      borderWidth: 0.5
-    });
+    for (let j = 0; j < 2; j++) {
+      const idx = i + j;
+      if (idx >= allVideoKeys.length) continue;
+      const vKey = allVideoKeys[idx];
+      const video = record.evidences[vKey];
+      const cardX = MARGIN + j * (videoCardWidth + 12);
+      const vLabel =
+        idx === 0
+          ? 'Vídeo de Diagnóstico 1'
+          : idx === 1
+          ? 'Vídeo de Diagnóstico 2'
+          : `Vídeo de Diagnóstico ${idx + 1}`;
 
-    currentPage.drawText(vField.label.toUpperCase(), {
-      x: cardX + 10,
-      y: y - 14,
-      size: 8,
-      font: fontBold,
-      color: COLOR_BLACK
-    });
+      currentPage.drawRectangle({
+        x: cardX,
+        y: y - videoCardHeight,
+        width: videoCardWidth,
+        height: videoCardHeight,
+        color: COLOR_LIGHT_BG,
+        borderColor: COLOR_BORDER,
+        borderWidth: 0.5
+      });
 
-    if (video) {
-      currentPage.drawText(`Status: Anexado (${formatFileSize(video.fileSize)})`, {
+      currentPage.drawText(vLabel.toUpperCase(), {
         x: cardX + 10,
-        y: y - 26,
+        y: y - 14,
         size: 8,
-        font: fontRegular,
-        color: COLOR_DARK_GRAY
+        font: fontBold,
+        color: COLOR_BLACK
       });
-      currentPage.drawText(`Arquivo: ${video.fileName.length > 35 ? video.fileName.substring(0, 32) + '...' : video.fileName}`, {
-        x: cardX + 10,
-        y: y - 38,
-        size: 7.5,
-        font: fontMono,
-        color: COLOR_MUTED_GRAY
-      });
-      currentPage.drawText('Disponível para reprodução e download no sistema.', {
-        x: cardX + 10,
-        y: y - 48,
-        size: 6.5,
-        font: fontRegular,
-        color: COLOR_MUTED_GRAY
-      });
-    } else {
-      currentPage.drawText('Status: Não anexado', {
-        x: cardX + 10,
-        y: y - 28,
-        size: 8,
-        font: fontRegular,
-        color: COLOR_MUTED_GRAY
-      });
-      currentPage.drawText('Nenhum arquivo de vídeo registrado para este campo.', {
-        x: cardX + 10,
-        y: y - 42,
-        size: 7,
-        font: fontRegular,
-        color: COLOR_MUTED_GRAY
-      });
+
+      if (video) {
+        currentPage.drawText(`Status: Anexado (${formatFileSize(video.fileSize)})`, {
+          x: cardX + 10,
+          y: y - 26,
+          size: 8,
+          font: fontRegular,
+          color: COLOR_DARK_GRAY
+        });
+        currentPage.drawText(
+          `Arquivo: ${video.fileName.length > 35 ? video.fileName.substring(0, 32) + '...' : video.fileName}`,
+          {
+            x: cardX + 10,
+            y: y - 38,
+            size: 7.5,
+            font: fontMono,
+            color: COLOR_MUTED_GRAY
+          }
+        );
+        currentPage.drawText('Disponível para reprodução e download no sistema.', {
+          x: cardX + 10,
+          y: y - 48,
+          size: 6.5,
+          font: fontRegular,
+          color: COLOR_MUTED_GRAY
+        });
+      } else {
+        currentPage.drawText('Status: Não anexado', {
+          x: cardX + 10,
+          y: y - 28,
+          size: 8,
+          font: fontRegular,
+          color: COLOR_MUTED_GRAY
+        });
+        currentPage.drawText('Nenhum arquivo de vídeo registrado para este campo.', {
+          x: cardX + 10,
+          y: y - 42,
+          size: 7,
+          font: fontRegular,
+          color: COLOR_MUTED_GRAY
+        });
+      }
     }
-  });
 
-  y -= videoCardHeight + 16;
+    y -= videoCardHeight + 12;
+  }
 
   // ==========================================
   // SEÇÃO 3: FOTOGRAFIAS DE DIAGNÓSTICO
@@ -446,12 +473,37 @@ export async function generateWarrantyPdf(record: WarrantyRecord): Promise<Uint8
   });
   y -= 14;
 
-  const photoFields: { key: 'photo1' | 'photo2' | 'photo3' | 'photo4'; title: string }[] = [
-    { key: 'photo1', title: 'Foto 1 - Visão Geral do Reparo' },
-    { key: 'photo2', title: 'Foto 2 - Evidência Direta da Falha' },
-    { key: 'photo3', title: 'Foto 3 - Detalhe / Macro da Avaria' },
-    { key: 'photo4', title: 'Foto 4 - Contexto / Medição Adicional' }
-  ];
+  const standardPhotoTitles: Record<string, string> = {
+    photo1: 'Foto 1 - Visão Geral do Reparo',
+    photo2: 'Foto 2 - Evidência Direta da Falha',
+    photo3: 'Foto 3 - Detalhe / Macro da Avaria',
+    photo4: 'Foto 4 - Contexto / Medição Adicional'
+  };
+
+  const standardPhotoKeys = ['photo1', 'photo2', 'photo3', 'photo4'];
+  const allPhotoKeys = Array.from(
+    new Set([
+      ...standardPhotoKeys,
+      ...Object.keys(record.evidences || {}).filter((k) => {
+        const ev = record.evidences[k];
+        const isVideo =
+          k.toLowerCase().startsWith('video') ||
+          ev?.category === 'video' ||
+          ev?.mimeType?.startsWith('video/');
+        const isPart =
+          k.toLowerCase().startsWith('newpart') ||
+          k.toLowerCase().startsWith('replacedpart') ||
+          ev?.category === 'new_part' ||
+          ev?.category === 'replaced_part';
+        return !isVideo && !isPart;
+      })
+    ])
+  ).filter((k, idx) => idx < 4 || !!record.evidences[k]);
+
+  const photoFields: { key: string; title: string }[] = allPhotoKeys.map((k, idx) => ({
+    key: k,
+    title: standardPhotoTitles[k] || `Foto ${idx + 1} - Evidência Diagnóstica Adicional`
+  }));
 
   // We layout photos in pairs (2 per row)
   const photoCardWidth = (CONTENT_WIDTH - 12) / 2;
@@ -574,21 +626,42 @@ export async function generateWarrantyPdf(record: WarrantyRecord): Promise<Uint8
   });
   y -= 14;
 
-  const partEvidenceGroups = [
+  const extraNewPartKeys = Object.keys(record.evidences || {}).filter(
+    (k) =>
+      !['newPartPhoto', 'newPartLabel1', 'newPartLabel2'].includes(k) &&
+      (k.toLowerCase().startsWith('newpart') || record.evidences[k]?.category === 'new_part') &&
+      !!record.evidences[k]
+  );
+  const extraReplacedPartKeys = Object.keys(record.evidences || {}).filter(
+    (k) =>
+      !['replacedPartPhoto', 'replacedPartLabel1', 'replacedPartLabel2'].includes(k) &&
+      (k.toLowerCase().startsWith('replacedpart') || record.evidences[k]?.category === 'replaced_part') &&
+      !!record.evidences[k]
+  );
+
+  const partEvidenceGroups: { groupTitle: string; items: { key: string; label: string }[] }[] = [
     {
       groupTitle: 'A. PEÇA NOVA (PEÇA GENUÍNA DE REPOSIÇÃO)',
       items: [
-        { key: 'newPartPhoto' as const, label: 'Foto da Peça Nova (Visão Geral)' },
-        { key: 'newPartLabel1' as const, label: 'Etiqueta da Peça Nova 1 (Embalagem / P/N)' },
-        { key: 'newPartLabel2' as const, label: 'Etiqueta da Peça Nova 2 (Gravação / QR Code)' }
+        { key: 'newPartPhoto', label: 'Foto da Peça Nova (Visão Geral)' },
+        { key: 'newPartLabel1', label: 'Etiqueta da Peça Nova 1 (Embalagem / P/N)' },
+        { key: 'newPartLabel2', label: 'Etiqueta da Peça Nova 2 (Gravação / QR Code)' },
+        ...extraNewPartKeys.map((k, idx) => ({
+          key: k,
+          label: `Peça Nova Adicional ${idx + 1}`
+        }))
       ]
     },
     {
       groupTitle: 'B. PEÇA SUBSTITUÍDA (PEÇA AVARIADA REMOVIDA)',
       items: [
-        { key: 'replacedPartPhoto' as const, label: 'Foto da Peça Substituída (Visão Geral)' },
-        { key: 'replacedPartLabel1' as const, label: 'Etiqueta da Peça Substituída 1 (P/N Visível)' },
-        { key: 'replacedPartLabel2' as const, label: 'Etiqueta da Peça Substituída 2 (Série / Lote)' }
+        { key: 'replacedPartPhoto', label: 'Foto da Peça Substituída (Visão Geral)' },
+        { key: 'replacedPartLabel1', label: 'Etiqueta da Peça Substituída 1 (P/N Visível)' },
+        { key: 'replacedPartLabel2', label: 'Etiqueta da Peça Substituída 2 (Série / Lote)' },
+        ...extraReplacedPartKeys.map((k, idx) => ({
+          key: k,
+          label: `Peça Substituída Adicional ${idx + 1}`
+        }))
       ]
     }
   ];

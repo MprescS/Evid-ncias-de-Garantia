@@ -1,5 +1,6 @@
 import { getSupabaseClient, DEFAULT_STORAGE_BUCKET, isSupabaseConfigured } from '../lib/supabase';
 import { ensureValidUUID, generateUUID } from '../utils/uuid';
+import { getEvidenceCategory } from '../utils/constants';
 import {
   WarrantyRecord,
   StoredEvidenceFile,
@@ -14,7 +15,7 @@ import {
 /**
  * Normalizes field key between frontend and PostgreSQL schema.
  */
-export const FIELD_KEY_TO_SQL_MAP: Record<EvidenceFieldKey, string> = {
+export const FIELD_KEY_TO_SQL_MAP: Record<string, string> = {
   video1: 'diagnostic_video_1',
   video2: 'diagnostic_video_2',
   photo1: 'diagnostic_photo_1',
@@ -311,11 +312,44 @@ export class SupabaseWarrantyService {
     }
 
     // Upsert record row
-    const { data: savedRow, error: saveErr } = await client
-      .from('warranty_records')
-      .upsert(payload, { onConflict: 'id' })
-      .select()
-      .single();
+    let savedRow: any = null;
+    let saveErr: any = null;
+
+    const performUpsert = async (dataToSave: Partial<SupabaseWarrantyRecordRow>) => {
+      return await client
+        .from('warranty_records')
+        .upsert(dataToSave, { onConflict: 'id' })
+        .select()
+        .single();
+    };
+
+    const firstAttempt = await performUpsert(payload);
+    savedRow = firstAttempt.data;
+    saveErr = firstAttempt.error;
+
+    // Self-healing: Se faltar coluna no schema cache do PostgreSQL/Supabase (ex: last_pdf_generated_at ou last_pdf_file_name)
+    if (saveErr && saveErr.message) {
+      const msg = saveErr.message;
+      if (
+        msg.includes('last_pdf_generated_at') ||
+        msg.includes('last_pdf_file_name') ||
+        (msg.includes('schema cache') && msg.includes('column'))
+      ) {
+        console.warn('Detectada ausência de coluna no schema cache do Supabase. Removendo campos opcionais e salvando...', msg);
+        delete payload.last_pdf_generated_at;
+        delete payload.last_pdf_file_name;
+
+        // Se a mensagem mencionar uma coluna específica ausente
+        const match = msg.match(/Could not find the '([^']+)' column/);
+        if (match && match[1]) {
+          delete (payload as any)[match[1]];
+        }
+
+        const retryAttempt = await performUpsert(payload);
+        savedRow = retryAttempt.data;
+        saveErr = retryAttempt.error;
+      }
+    }
 
     if (saveErr) {
       if (
@@ -389,7 +423,7 @@ export class SupabaseWarrantyService {
     }
 
     const validRecordId = ensureValidUUID(recordId);
-    const category = FIELD_CATEGORY_MAP[fieldKey] || 'diagnostic_photo';
+    const category = getEvidenceCategory(fieldKey, (fileData as any).category);
     const sqlFieldKey = FIELD_KEY_TO_SQL_MAP[fieldKey] || fieldKey;
     const attachmentId = generateUUID();
 
@@ -472,9 +506,18 @@ export class SupabaseWarrantyService {
       attachmentPayload.created_by = attachAuthUserId;
     }
 
-    const { error: dbAttachError } = await client
+    let { error: dbAttachError } = await client
       .from('warranty_attachments')
       .upsert(attachmentPayload, { onConflict: 'record_id,field_key' });
+
+    // Fallback if the Supabase database has a legacy check constraint (e.g. only 'photo' or 'video')
+    if (dbAttachError && dbAttachError.message?.toLowerCase().includes('category_check')) {
+      const fallbackCategory = fileData.mimeType?.startsWith('video') ? 'video' : 'photo';
+      const retry = await client
+        .from('warranty_attachments')
+        .upsert({ ...attachmentPayload, category: fallbackCategory }, { onConflict: 'record_id,field_key' });
+      dbAttachError = retry.error;
+    }
 
     if (dbAttachError) {
       // Rollback uploaded file to avoid orphan files
@@ -485,6 +528,11 @@ export class SupabaseWarrantyService {
       ) {
         throw new Error(
           `A coluna 'created_by' na tabela warranty_attachments está como NOT NULL. Execute no SQL Editor do Supabase: ALTER TABLE public.warranty_attachments ALTER COLUMN created_by DROP NOT NULL;`
+        );
+      }
+      if (dbAttachError.message?.toLowerCase().includes('category_check')) {
+        throw new Error(
+          `A tabela warranty_attachments possui uma restrição antiga (category_check). Execute no SQL Editor do Supabase: ALTER TABLE public.warranty_attachments DROP CONSTRAINT IF EXISTS warranty_attachments_category_check;`
         );
       }
       throw new Error(`Falha ao registrar anexo no PostgreSQL: ${dbAttachError.message}`);
@@ -540,6 +588,9 @@ export class SupabaseWarrantyService {
 
     // 1. Ensure the parent record exists in PostgreSQL first
     const now = new Date().toISOString();
+    const isCompleted = record.status === 'finalizado' || record.status === 'finalized';
+    const dbStatus = isCompleted ? 'finalized' : 'draft';
+
     const payload: Partial<SupabaseWarrantyRecordRow> = {
       id: validRecordId,
       os_number: (record.osNumber || '').trim(),
@@ -547,7 +598,7 @@ export class SupabaseWarrantyService {
       technician: (record.technician || '').trim(),
       repair_date: record.repairDate || now.slice(0, 10),
       technical_report: record.technicalReport || '',
-      status: record.status || 'draft',
+      status: dbStatus,
       updated_at: now
     };
 

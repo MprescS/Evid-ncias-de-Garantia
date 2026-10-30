@@ -385,12 +385,12 @@ export const RecordList: React.FC<RecordListProps> = ({
                   {/* Summary of Evidences Attached */}
                   <div className="flex items-center gap-3 pt-1 text-xs">
                     <span className="text-neutral-400 font-mono text-[11px]">
-                      Evidências: <strong className="text-white">{attachedCount}</strong>/12 anexadas
+                      Evidências: <strong className="text-white">{attachedCount}</strong> {attachedCount === 1 ? 'anexo' : 'anexos'}
                     </span>
                     <div className="w-28 h-2 bg-[#26262E] overflow-hidden">
                       <div
                         className="h-full bg-[#D5001C] transition-all duration-300"
-                        style={{ width: `${(attachedCount / 12) * 100}%` }}
+                        style={{ width: `${Math.min(100, Math.round((attachedCount / Math.max(1, Math.max(12, Object.keys(record.evidences || {}).length))) * 100))}%` }}
                       />
                     </div>
                   </div>

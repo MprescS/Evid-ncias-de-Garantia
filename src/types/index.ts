@@ -1,4 +1,4 @@
-export type EvidenceFieldKey =
+export type StandardEvidenceFieldKey =
   | 'video1'
   | 'video2'
   | 'photo1'
@@ -12,6 +12,8 @@ export type EvidenceFieldKey =
   | 'replacedPartLabel1'
   | 'replacedPartLabel2';
 
+export type EvidenceFieldKey = StandardEvidenceFieldKey | (string & {});
+
 export type EvidenceCategory = 'video' | 'diagnostic_photo' | 'new_part' | 'replaced_part';
 
 export interface FieldDefinition {
@@ -22,6 +24,7 @@ export interface FieldDefinition {
   type: 'video' | 'image';
   required?: boolean;
   description: string;
+  isCustom?: boolean;
 }
 
 export interface StoredEvidenceFile {
@@ -54,7 +57,7 @@ export interface WarrantyRecord {
   updatedAt: string;
   finalizedAt?: string;
   createdBy?: string;
-  evidences: Partial<Record<EvidenceFieldKey, StoredEvidenceFile | null>>;
+  evidences: Record<string, StoredEvidenceFile | null | undefined>;
   lastPdfGeneratedAt?: string;
   lastPdfFileName?: string;
   // Cloud sync metadata

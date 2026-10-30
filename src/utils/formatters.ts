@@ -96,7 +96,7 @@ export function validateRecord(record: WarrantyRecord): ValidationSummary {
   // Evidence counts
   const evidenceEntries = Object.values(record.evidences || {});
   const filledEvidenceCount = evidenceEntries.filter(e => !!e).length;
-  const totalEvidenceCount = 12;
+  const totalEvidenceCount = Math.max(12, Object.keys(record.evidences || {}).length);
 
   if (filledEvidenceCount === 0) {
     warnings.push({
