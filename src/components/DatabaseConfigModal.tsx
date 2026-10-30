@@ -26,6 +26,7 @@ import {
   clearSupabaseConfig,
   testSupabaseConnection,
   isSupabaseConfigured,
+  cleanSupabaseUrl,
   ConnectionTestResult,
   DEFAULT_STORAGE_BUCKET
 } from '../lib/supabase';
@@ -74,14 +75,16 @@ export const DatabaseConfigModal: React.FC<DatabaseConfigModalProps> = ({
   if (!isOpen) return null;
 
   const handleSaveConfig = () => {
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
+    const cleanedUrl = cleanSupabaseUrl(supabaseUrl);
+    setSupabaseUrl(cleanedUrl);
+    if (!cleanedUrl || !supabaseKey.trim()) {
       setTestResult({
         success: false,
         message: 'Por favor, informe a URL do Projeto (Project URL) e a Chave Anon (Publishable Key) do seu projeto Supabase antes de salvar e conectar.'
       });
       return;
     }
-    saveSupabaseConfig(supabaseUrl.trim(), supabaseKey.trim());
+    saveSupabaseConfig(cleanedUrl, supabaseKey.trim());
     const updated = getSupabaseConfig();
     setConfigSource(updated.source);
     setSaveSuccess(true);
@@ -380,10 +383,22 @@ USING (bucket_id = 'warranty-evidence' AND auth.role() IN ('authenticated', 'ano
                   Integração Supabase & Banco de Dados
                 </h3>
                 {isConfigured ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">
-                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                    Supabase Ativo
-                  </span>
+                  testResult && !testResult.success ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold bg-rose-950/80 text-rose-400 border border-rose-500/40">
+                      <span className="w-1.5 h-1.5 bg-rose-400 rounded-full" />
+                      Falha de Conexão
+                    </span>
+                  ) : testResult?.success ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+                      Supabase Conectado
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold bg-blue-950/80 text-blue-400 border border-blue-500/40">
+                      <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                      Credenciais Informadas
+                    </span>
+                  )
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold bg-amber-950/80 text-amber-400 border border-amber-500/40">
                     Modo Local (IndexedDB)
@@ -647,7 +662,7 @@ USING (bucket_id = 'warranty-evidence' AND auth.role() IN ('authenticated', 'ano
                         </div>
                       )}
 
-                      {testResult.details && (
+                      {testResult.success && testResult.details && (
                         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
                           <div className="p-2 bg-black/40 border border-white/10">
                             PostgreSQL warranty_records: <span className="font-bold text-emerald-400">Ativo ({testResult.details.recordsCount} registros)</span>

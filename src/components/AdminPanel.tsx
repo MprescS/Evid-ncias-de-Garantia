@@ -38,6 +38,7 @@ import {
   clearSupabaseConfig,
   testSupabaseConnection,
   isSupabaseConfigured,
+  cleanSupabaseUrl,
   DEFAULT_STORAGE_BUCKET
 } from '../lib/supabase';
 
@@ -320,14 +321,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleSaveSbConfig = () => {
-    if (!sbUrl.trim() || !sbKey.trim()) {
+    const cleanedUrl = cleanSupabaseUrl(sbUrl);
+    setSbUrl(cleanedUrl);
+    if (!cleanedUrl || !sbKey.trim()) {
       setSbTestResult({
         success: false,
         message: 'Por favor, informe a URL do Projeto (Project URL) e a Chave Anon (Publishable Key) do seu projeto Supabase antes de salvar.'
       });
       return;
     }
-    saveSupabaseConfig(sbUrl.trim(), sbKey.trim());
+    saveSupabaseConfig(cleanedUrl, sbKey.trim());
     setSbSaveSuccess(true);
     setTimeout(() => setSbSaveSuccess(false), 3000);
     handleTestSb();

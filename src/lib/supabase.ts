@@ -16,9 +16,27 @@ let activeClient: SupabaseClient | null = null;
 export function cleanSupabaseUrl(rawUrl: string): string {
   let url = (rawUrl || '').trim();
   if (!url) return '';
+
+  // 1. If user pasted Supabase dashboard URL, e.g. https://supabase.com/dashboard/project/xyz or https://app.supabase.com/project/xyz
+  const dashMatch = url.match(/project\/([a-z0-9_-]+)/i);
+  if (dashMatch && dashMatch[1]) {
+    return `https://${dashMatch[1]}.supabase.co`;
+  }
+
+  // 2. If user just entered the project reference id (e.g. "b4rzac5cfkxjdwouz7bjjk")
+  if (!url.includes('.') && /^[a-z0-9_-]{12,}$/i.test(url)) {
+    return `https://${url}.supabase.co`;
+  }
+
+  // 3. Remove trailing /rest/v1 or /rest/v1/
+  url = url.replace(/\/rest\/v1\/?$/, '');
+
+  // 4. Ensure protocol
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
   }
+
+  // 5. Remove any trailing slashes
   return url.replace(/\/+$/, '');
 }
 
@@ -34,7 +52,7 @@ export function formatSupabaseErrorMessage(rawError: string): string {
     errLower.includes('err_name_not_resolved') ||
     errLower.includes('connection refused')
   ) {
-    return 'Não foi possível alcançar os servidores do Supabase (Failed to fetch). Causas prováveis:\n1. Projeto Pausado: No plano gratuito do Supabase, projetos sem uso são pausados. Acesse app.supabase.com e clique em "Restore Project".\n2. URL Incorreta: Certifique-se de que a URL termina em .supabase.co sem barras extras.\n3. Bloqueador de Anúncios ou Rede: Verifique sua conexão e desative bloqueadores de anúncios (adblock) para este site.\n4. Seus dados continuam 100% seguros e salvos no IndexedDB local.';
+    return 'Não foi possível alcançar os servidores do Supabase (Failed to fetch). Causas prováveis:\n1. Projeto Pausado: No plano gratuito do Supabase, projetos sem uso recente são pausados automaticamente. Acesse app.supabase.com e clique em "Restore Project".\n2. URL Incorreta: Certifique-se de que a URL segue o formato https://[id-do-projeto].supabase.co sem barras extras.\n3. Bloqueador de Anúncios ou Rede: Verifique sua conexão e desative bloqueadores de anúncios (adblock) para este site.\n4. Seus dados continuam 100% seguros e salvos no IndexedDB local.';
   }
 
   if (errLower.includes('jwt') || errLower.includes('invalid api key') || errLower.includes('api key not found')) {
@@ -163,11 +181,48 @@ export interface ConnectionTestResult {
  * Tests live connection to Supabase PostgreSQL and Storage bucket.
  */
 export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
+  const config = getSupabaseConfig();
   const client = getSupabaseClient();
-  if (!client) {
+  if (!client || !config.url || !config.publishableKey) {
     return {
       success: false,
       message: 'Credenciais do Supabase não configuradas (URL ou Publishable Key ausente).'
+    };
+  }
+
+  // Pre-flight check: Test reachability directly
+  let isAuthInvalid = false;
+  let networkFailed = false;
+  let rawFetchError = '';
+
+  try {
+    const res = await fetch(`${config.url}/auth/v1/health`, {
+      method: 'GET',
+      headers: {
+        apikey: config.publishableKey
+      }
+    });
+    if (res.status === 401 || res.status === 403) {
+      isAuthInvalid = true;
+    }
+  } catch (netErr: any) {
+    networkFailed = true;
+    rawFetchError = netErr.message || '';
+  }
+
+  if (isAuthInvalid) {
+    return {
+      success: false,
+      message: 'A URL do projeto foi alcançada, mas a Chave Anon (Publishable Key) é inválida ou expirou. Copie a chave "anon / public" em Project Settings > API no painel do Supabase.',
+      details: { databaseConnected: false }
+    };
+  }
+
+  if (networkFailed) {
+    return {
+      success: false,
+      message: `Não foi possível alcançar os servidores do Supabase (Failed to fetch). Causas prováveis:\n1. Projeto Pausado: No plano gratuito do Supabase, projetos sem uso recente são pausados automaticamente. Acesse app.supabase.com e clique em "Restore Project".\n2. URL Incorreta: A URL atual é "${config.url}". Verifique se o ID do projeto está correto.\n3. Bloqueador de Anúncios ou Rede: Verifique sua conexão e desative bloqueadores de anúncios (adblock) para este site.\n4. Seus dados continuam 100% seguros e salvos no IndexedDB local.`,
+      details: { databaseConnected: false }
     };
   }
 
@@ -182,8 +237,8 @@ export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
       if (dbError.code === '42P01' || dbError.message?.toLowerCase().includes('relation') || dbError.message?.toLowerCase().includes('does not exist')) {
         return {
           success: false,
-          message: 'Conectou ao Supabase, mas a tabela "warranty_records" ainda não existe. Execute o script de migração SQL no SQL Editor do painel do Supabase.',
-          details: { databaseConnected: true }
+          message: 'O servidor Supabase está online e acessível! Porém, a tabela "warranty_records" ainda não existe no seu banco de dados. Acesse a aba "Migração SQL & RLS" acima, copie o script e execute no SQL Editor do Supabase.',
+          details: { databaseConnected: false }
         };
       }
       return {
@@ -218,7 +273,8 @@ export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
   } catch (err: any) {
     return {
       success: false,
-      message: formatSupabaseErrorMessage(err.message || 'Falha de comunicação de rede com o Supabase')
+      message: formatSupabaseErrorMessage(err.message || 'Falha de comunicação de rede com o Supabase'),
+      details: { databaseConnected: false }
     };
   }
 }
