@@ -73,6 +73,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
   // Current draft state
   const [formData, setFormData] = useState<WarrantyRecord>({ ...initialRecord });
   const [isSaving, setIsSaving] = useState(false);
+  const [saveProgressMessage, setSaveProgressMessage] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   // Real-time Cloud Auto-Sync State
@@ -346,13 +347,21 @@ export const RecordForm: React.FC<RecordFormProps> = ({
   };
 
   const handleSaveDraft = async () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
     setIsSaving(true);
+    const isCloud = isSupabaseConfigured();
+    setSaveProgressMessage(
+      isCloud
+        ? 'Salvando registro e sincronizando com o Supabase...'
+        : 'Salvando registro no dispositivo (IndexedDB)...'
+    );
     try {
       await onSave({ ...formData, status: 'em_preenchimento' }, false);
-      const isCloud = isSupabaseConfigured();
       setSaveSuccessMsg(
         isCloud
-          ? 'Rascunho salvo e sincronizado com o Supabase PostgreSQL!'
+          ? 'Rascunho salvo e sincronizado com a Nuvem Supabase com sucesso!'
           : 'Rascunho salvo com sucesso no armazenamento local (IndexedDB)!'
       );
       setTimeout(() => setSaveSuccessMsg(null), 3500);
@@ -360,6 +369,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
       alert(`Erro ao salvar rascunho: ${err.message || 'Tente novamente'}`);
     } finally {
       setIsSaving(false);
+      setSaveProgressMessage(null);
     }
   };
 
@@ -369,7 +379,16 @@ export const RecordForm: React.FC<RecordFormProps> = ({
       return;
     }
 
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
     setIsSaving(true);
+    const isCloud = isSupabaseConfigured();
+    setSaveProgressMessage(
+      isCloud
+        ? 'Finalizando OS e enviando evidências para o Supabase...'
+        : 'Finalizando OS no dispositivo (IndexedDB)...'
+    );
     try {
       const updated = {
         ...formData,
@@ -377,12 +396,13 @@ export const RecordForm: React.FC<RecordFormProps> = ({
         version: (formData.version || 1) + 1
       };
       await onSave(updated, true);
-      setSaveSuccessMsg('Registro finalizado e atualizado com sucesso!');
+      setSaveSuccessMsg('Registro finalizado e sincronizado com sucesso!');
       setTimeout(() => setSaveSuccessMsg(null), 3000);
     } catch (err: any) {
       alert(`Erro ao finalizar: ${err.message || 'Tente novamente'}`);
     } finally {
       setIsSaving(false);
+      setSaveProgressMessage(null);
     }
   };
 
@@ -571,7 +591,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
   const attachedReplacedPartCount = replacedPartFields.filter((f) => !!formData.evidences[f.key]).length;
 
   return (
-    <div className="space-y-6 pb-28 sm:pb-16 max-w-7xl mx-auto">
+    <div className="space-y-5 sm:space-y-6 pb-36 sm:pb-16 max-w-7xl mx-auto px-2 sm:px-4">
       {/* Top Action Bar (Dark Graphite surface) */}
       <div className="bg-[#18181C] border border-[#27272E] p-3 sm:p-4 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3 sticky top-14 sm:top-16 z-30">
         <div className="flex items-center gap-3">
@@ -630,6 +650,29 @@ export const RecordForm: React.FC<RecordFormProps> = ({
           </div>
         </div>
 
+        {/* Mobile Quick Action Buttons (header zone) */}
+        <div className="flex sm:hidden items-center justify-end gap-2 shrink-0 pt-2 border-t border-[#262630]">
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            disabled={isSaving}
+            className="flex-1 min-h-[42px] px-3 py-1.5 bg-[#252530] hover:bg-[#2F2F3D] active:scale-98 border border-[#3A3A48] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Save className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{isSaving ? 'Salvando...' : 'Salvar'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFinalize}
+            disabled={isSaving}
+            className="flex-1 min-h-[42px] px-3 py-1.5 bg-[#D5001C] hover:bg-[#b00017] active:scale-98 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+          >
+            <CheckCircle className="w-3.5 h-3.5" />
+            <span>Finalizar</span>
+          </button>
+        </div>
+
         {/* Action Buttons for Desktop / Tablet */}
         <div className="hidden sm:flex flex-wrap items-center gap-2">
           <button
@@ -643,13 +686,16 @@ export const RecordForm: React.FC<RecordFormProps> = ({
           <button
             type="button"
             onClick={async () => {
+              if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
               setIsSaving(true);
+              setSaveProgressMessage('Salvando alterações e retornando...');
               try {
                 await onSave({ ...formData, status: 'em_preenchimento' }, true);
               } catch (e: any) {
                 alert('Erro ao salvar: ' + e.message);
               } finally {
                 setIsSaving(false);
+                setSaveProgressMessage(null);
               }
             }}
             disabled={isSaving}
@@ -1500,6 +1546,84 @@ ALTER TABLE public.warranty_attachments ALTER COLUMN created_by DROP NOT NULL;`}
                   <span>{isRetryingSync ? 'Sincronizando...' : 'Tentar Salvar na Nuvem Novamente'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Sticky Bottom Action Bar (Thumb-Optimized, <15% viewport height) */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#141418]/95 backdrop-blur-md border-t border-[#2C2C3A] px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl safe-area-bottom">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            disabled={isSaving}
+            className="min-h-[48px] px-3 py-2 bg-[#22222A] hover:bg-[#2A2A34] active:scale-98 border border-[#353545] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+          >
+            <Save className="w-4 h-4 text-emerald-400" />
+            <span>{isSaving ? 'Salvando...' : 'Salvar OS'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFinalize}
+            disabled={isSaving}
+            className="min-h-[48px] px-3 py-2 bg-[#D5001C] hover:bg-[#b00017] active:scale-98 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50 cursor-pointer"
+          >
+            <CheckCircle className="w-4 h-4" />
+            <span>{isSaving ? 'Enviando...' : 'Finalizar OS'}</span>
+          </button>
+        </div>
+
+        {/* Secondary Navigation Row for Cell Phones */}
+        <div className="flex items-center justify-between text-[11px] pt-1.5 px-0.5 text-neutral-400 font-mono">
+          <button
+            type="button"
+            onClick={() => setShowCancelConfirm(true)}
+            className="hover:text-white transition-colors py-1 px-1 underline cursor-pointer"
+          >
+            ← Voltar
+          </button>
+          <button
+            type="button"
+            onClick={() => onRequestPdf(formData)}
+            className="hover:text-white transition-colors py-1 px-1 flex items-center gap-1 cursor-pointer text-neutral-300"
+          >
+            <FileText className="w-3.5 h-3.5 text-[#D5001C]" />
+            <span>Ver Relatório PDF</span>
+          </button>
+          <div className="flex items-center gap-1">
+            {autoSyncState.status === 'saving' ? (
+              <span className="text-amber-400 flex items-center gap-1 font-semibold">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Nuvem...
+              </span>
+            ) : autoSyncState.status === 'synced' ? (
+              <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                <Cloud className="w-3 h-3" /> Na Nuvem
+              </span>
+            ) : (
+              <span className="text-blue-400 flex items-center gap-1 font-semibold">
+                <HardDrive className="w-3 h-3" /> No Celular
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Saving & Cloud Uploading Live Overlay */}
+      {isSaving && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#18181C] border border-[#2D2D38] p-6 max-w-sm w-full text-center shadow-2xl flex flex-col items-center space-y-4">
+            <div className="w-12 h-12 border-3 border-[#D5001C] border-t-transparent rounded-full animate-spin" />
+            <div className="space-y-1.5">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                {saveProgressMessage || 'Salvando Registro de Garantia...'}
+              </h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                {isSupabaseConfigured()
+                  ? 'Sincronizando com o Supabase (PostgreSQL e Storage). Evidências sendo salvas imediatamente na nuvem.'
+                  : 'Gravando os dados e fotos no armazenamento seguro do dispositivo (IndexedDB)...'}
+              </p>
             </div>
           </div>
         </div>

@@ -352,20 +352,28 @@ export class SupabaseWarrantyService {
     }
 
     if (saveErr) {
+      const saveErrMsg = saveErr.message || '';
+      const saveErrLower = saveErrMsg.toLowerCase();
+
+      if (saveErrLower.includes('failed to fetch') || saveErrLower.includes('network') || saveErrLower.includes('load failed')) {
+        throw new Error(
+          `Não foi possível alcançar o servidor Supabase (Failed to fetch). O projeto pode estar pausado por inatividade ou a rede está instável. Seus dados foram salvos com segurança no dispositivo (IndexedDB).`
+        );
+      }
       if (
-        saveErr.message?.toLowerCase().includes('created_by') &&
-        (saveErr.message?.toLowerCase().includes('not-null') || saveErr.message?.toLowerCase().includes('null value'))
+        saveErrLower.includes('created_by') &&
+        (saveErrLower.includes('not-null') || saveErrLower.includes('null value'))
       ) {
         throw new Error(
           `A coluna "created_by" no Supabase está como NOT NULL. Como o app opera sem login obrigatório, execute no SQL Editor do Supabase: ALTER TABLE public.warranty_records ALTER COLUMN created_by DROP NOT NULL; ALTER TABLE public.warranty_attachments ALTER COLUMN created_by DROP NOT NULL;`
         );
       }
-      if (saveErr.message?.toLowerCase().includes('status_check')) {
+      if (saveErrLower.includes('status_check')) {
         throw new Error(
           `A restrição de status do PostgreSQL ('warranty_records_status_check') exige os valores 'draft' ou 'finalized'. O aplicativo foi atualizado para normalizar automaticamente.`
         );
       }
-      throw new Error(`Falha ao salvar registro no PostgreSQL: ${saveErr.message}`);
+      throw new Error(`Falha ao salvar registro no PostgreSQL: ${saveErrMsg}`);
     }
 
     // Sync evidences (for any newly attached base64 or blob files)
@@ -476,9 +484,17 @@ export class SupabaseWarrantyService {
     }
 
     if (uploadError) {
-      const errMsg = uploadError.message?.toLowerCase().includes('not found')
+      const upErrMsg = uploadError.message || '';
+      const upErrLower = upErrMsg.toLowerCase();
+
+      if (upErrLower.includes('failed to fetch') || upErrLower.includes('network') || upErrLower.includes('load failed')) {
+        throw new Error(
+          `Falha de comunicação de rede no envio para o Supabase Storage (Failed to fetch). O arquivo continua salvo com segurança no armazenamento local.`
+        );
+      }
+      const errMsg = upErrLower.includes('not found')
         ? `Bucket de armazenamento '${DEFAULT_STORAGE_BUCKET}' não foi encontrado no seu Supabase. Crie o bucket no painel do Supabase (Storage > New Bucket > ${DEFAULT_STORAGE_BUCKET}) ou execute o SQL da aba Nuvem.`
-        : `Erro ao enviar arquivo para o Supabase Storage: ${uploadError.message}`;
+        : `Erro ao enviar arquivo para o Supabase Storage: ${upErrMsg}`;
       throw new Error(errMsg);
     }
 

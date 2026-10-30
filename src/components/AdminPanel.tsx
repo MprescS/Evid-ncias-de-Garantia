@@ -27,7 +27,8 @@ import {
   Cloud,
   Server,
   Copy,
-  Check
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import { Technician, AppSettings, WarrantyRecord } from '../types';
 import { warrantyDb } from '../utils/storage';
@@ -922,17 +923,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             {sbTestResult && (
               <div
-                className={`p-3.5 border text-xs ${
+                className={`p-4 border text-xs ${
                   sbTestResult.success
                     ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
                     : 'bg-rose-950/50 border-rose-500/50 text-rose-200'
                 }`}
               >
-                <div className="flex items-center gap-2 font-bold mb-1">
-                  {sbTestResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-rose-400" />}
-                  <span>{sbTestResult.success ? 'Conexão Estabelecida!' : 'Falha na Conexão'}</span>
+                <div className="flex items-center gap-2 font-bold mb-2">
+                  {sbTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-rose-400" />
+                  )}
+                  <span className="text-sm font-bold uppercase tracking-wider">
+                    {sbTestResult.success ? 'Conexão Supabase Estabelecida!' : 'Falha na Conexão com o Supabase'}
+                  </span>
                 </div>
-                <p>{sbTestResult.message}</p>
+                <p className="whitespace-pre-line leading-relaxed text-xs">
+                  {sbTestResult.message}
+                </p>
+
+                {!sbTestResult.success && (
+                  <div className="mt-3 pt-3 border-t border-rose-800/40 flex flex-wrap items-center gap-2">
+                    <a
+                      href="https://supabase.com/dashboard"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white text-[11px] font-bold uppercase tracking-wider transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir Painel do Supabase</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleTestSb}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800/80 border border-rose-500/50 text-rose-100 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Testar Novamente</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

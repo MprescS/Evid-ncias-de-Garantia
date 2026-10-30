@@ -623,7 +623,29 @@ USING (bucket_id = 'warranty-evidence' AND auth.role() IN ('authenticated', 'ano
                       <h4 className="font-bold text-xs uppercase tracking-wider">
                         {testResult.success ? 'Conexão Supabase Validada com Êxito' : 'Falha na Validação da Conexão'}
                       </h4>
-                      <p className="text-xs leading-relaxed">{testResult.message}</p>
+                      <p className="text-xs leading-relaxed whitespace-pre-line">{testResult.message}</p>
+
+                      {!testResult.success && (
+                        <div className="mt-3 pt-3 border-t border-rose-800/40 flex flex-wrap items-center gap-2">
+                          <a
+                            href="https://supabase.com/dashboard"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white text-[11px] font-bold uppercase tracking-wider transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Abrir Painel do Supabase</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={handleTestConnection}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800/80 border border-rose-500/50 text-rose-100 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Testar Novamente</span>
+                          </button>
+                        </div>
+                      )}
 
                       {testResult.details && (
                         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">

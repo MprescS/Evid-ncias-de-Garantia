@@ -13,16 +13,48 @@ export interface SupabaseConfig {
 
 let activeClient: SupabaseClient | null = null;
 
+export function cleanSupabaseUrl(rawUrl: string): string {
+  let url = (rawUrl || '').trim();
+  if (!url) return '';
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url;
+  }
+  return url.replace(/\/+$/, '');
+}
+
+export function formatSupabaseErrorMessage(rawError: string): string {
+  const msg = rawError || '';
+  const errLower = msg.toLowerCase();
+  
+  if (
+    errLower.includes('failed to fetch') ||
+    errLower.includes('networkerror') ||
+    errLower.includes('network error') ||
+    errLower.includes('load failed') ||
+    errLower.includes('err_name_not_resolved') ||
+    errLower.includes('connection refused')
+  ) {
+    return 'Não foi possível alcançar os servidores do Supabase (Failed to fetch). Causas prováveis:\n1. Projeto Pausado: No plano gratuito do Supabase, projetos sem uso são pausados. Acesse app.supabase.com e clique em "Restore Project".\n2. URL Incorreta: Certifique-se de que a URL termina em .supabase.co sem barras extras.\n3. Bloqueador de Anúncios ou Rede: Verifique sua conexão e desative bloqueadores de anúncios (adblock) para este site.\n4. Seus dados continuam 100% seguros e salvos no IndexedDB local.';
+  }
+
+  if (errLower.includes('jwt') || errLower.includes('invalid api key') || errLower.includes('api key not found')) {
+    return 'A Chave Anon (Publishable Key) informada é inválida ou expirou. Obtenha a chave atualizada em Project Settings > API no painel do Supabase.';
+  }
+
+  return msg;
+}
+
 /**
  * Retrieves the current Supabase configuration prioritizing environment variables,
  * falling back to user-configured credentials in local storage.
  */
 export function getSupabaseConfig(): SupabaseConfig {
   // 1. Environment variables
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+  const rawEnvUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
   const envKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  const envUrl = cleanSupabaseUrl(rawEnvUrl);
 
-  if (envUrl && envKey && envUrl !== 'https://seu-projeto.supabase.co' && !envUrl.includes('sua-url')) {
+  if (envUrl && envKey && !envUrl.includes('seu-projeto') && !envUrl.includes('sua-url')) {
     return {
       url: envUrl,
       publishableKey: envKey,
@@ -32,8 +64,9 @@ export function getSupabaseConfig(): SupabaseConfig {
 
   // 2. Saved in browser storage
   if (typeof window !== 'undefined') {
-    const savedUrl = (localStorage.getItem(STORAGE_KEY_URL) || '').trim();
+    const rawSavedUrl = (localStorage.getItem(STORAGE_KEY_URL) || '').trim();
     const savedKey = (localStorage.getItem(STORAGE_KEY_PUBKEY) || '').trim();
+    const savedUrl = cleanSupabaseUrl(rawSavedUrl);
     if (savedUrl && savedKey) {
       return {
         url: savedUrl,
@@ -91,7 +124,7 @@ export function getSupabaseClient(): SupabaseClient | null {
  * Saves custom Supabase credentials from UI and refreshes the client.
  */
 export function saveSupabaseConfig(url: string, publishableKey: string): void {
-  const cleanUrl = url.trim();
+  const cleanUrl = cleanSupabaseUrl(url);
   const cleanKey = publishableKey.trim();
 
   if (typeof window !== 'undefined') {
@@ -149,13 +182,13 @@ export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
       if (dbError.code === '42P01' || dbError.message?.toLowerCase().includes('relation') || dbError.message?.toLowerCase().includes('does not exist')) {
         return {
           success: false,
-          message: 'Conectou ao Supabase, mas a tabela "warranty_records" ainda não existe. Execute o script de migração SQL fornecido no painel do Supabase.',
+          message: 'Conectou ao Supabase, mas a tabela "warranty_records" ainda não existe. Execute o script de migração SQL no SQL Editor do painel do Supabase.',
           details: { databaseConnected: true }
         };
       }
       return {
         success: false,
-        message: `Erro ao acessar tabela PostgreSQL: ${dbError.message}`,
+        message: formatSupabaseErrorMessage(dbError.message || 'Erro ao consultar tabela PostgreSQL'),
         details: { databaseConnected: false }
       };
     }
@@ -168,7 +201,7 @@ export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
         bucketExists = buckets.some((b) => b.name === DEFAULT_STORAGE_BUCKET);
       }
     } catch {
-      // Bucket list might be restricted by RLS; try test head upload or assume true
+      // Bucket list might be restricted by RLS; assume true if query succeeded
       bucketExists = true;
     }
 
@@ -185,7 +218,7 @@ export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
   } catch (err: any) {
     return {
       success: false,
-      message: `Falha na conexão de rede com o Supabase: ${err.message || 'Erro desconhecido'}`
+      message: formatSupabaseErrorMessage(err.message || 'Falha de comunicação de rede com o Supabase')
     };
   }
 }
